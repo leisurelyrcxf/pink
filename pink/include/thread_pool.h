@@ -18,10 +18,21 @@ namespace pink {
 
 typedef void (*TaskFunc)(void*);
 
+struct TaskArg;
+class TaskArgOwner {
+public:
+	virtual ~TaskArgOwner() = default;
+	virtual void gc(TaskArg* ele) = 0;
+};
+
+struct TaskArg {
+	TaskArgOwner* owner = nullptr;
+};
+
 struct Task {
  TaskFunc func;
- void* arg;
- Task (TaskFunc _func, void* _arg)
+ TaskArg* arg;
+ Task (TaskFunc _func, TaskArg* _arg)
      : func(_func), arg(_arg) {}
 };
 
@@ -70,13 +81,16 @@ class ThreadPool {
   bool should_stop();
   void set_should_stop();
 
-  void Schedule(TaskFunc func, void* arg);
+  void Schedule(TaskFunc func, TaskArg* arg);
+  void ScheduleLocked(TaskFunc func, TaskArg* arg);
   void DelaySchedule(uint64_t timeout, TaskFunc func, void* arg);
   size_t max_queue_size();
   size_t worker_size();
   void cur_queue_size(size_t* qsize);
   void cur_time_queue_size(size_t* qsize);
   std::string thread_pool_name();
+
+  slash::Mutex& get_mutex() { return mu_; }
 
  private:
   void runInThread();

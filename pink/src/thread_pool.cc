@@ -98,8 +98,13 @@ void ThreadPool::set_should_stop() {
   should_stop_.store(true);
 }
 
-void ThreadPool::Schedule(TaskFunc func, void* arg) {
+void ThreadPool::Schedule(TaskFunc func, TaskArg* arg) {
   mu_.Lock();
+  ScheduleLocked(func, arg);
+  mu_.Unlock();
+}
+
+void ThreadPool::ScheduleLocked(TaskFunc func, TaskArg* arg) {
   while (queue_.size() >= max_queue_size_ && !should_stop()) {
     wsignal_.Wait();
   }
@@ -107,7 +112,6 @@ void ThreadPool::Schedule(TaskFunc func, void* arg) {
     queue_.push(Task(func, arg));
     rsignal_.SignalAll();
   }
-  mu_.Unlock();
 }
 
 /*
@@ -151,8 +155,13 @@ std::string ThreadPool::thread_pool_name() {
 }
 
 void ThreadPool::runInThread() {
+  TaskArg* completed_arg = nullptr;
   while (!should_stop()) {
     mu_.Lock();
+    if (completed_arg != nullptr) {
+      completed_arg->owner->gc(completed_arg);
+      completed_arg = nullptr;
+    }
     while (queue_.empty() && time_queue_.empty() && !should_stop()) {
       rsignal_.Wait();
     }
@@ -182,11 +191,14 @@ void ThreadPool::runInThread() {
     }
     if (!queue_.empty()) {
       TaskFunc func = queue_.front().func;
-      void* arg = queue_.front().arg;
+      TaskArg* arg = queue_.front().arg;
       queue_.pop();
       wsignal_.SignalAll();
       mu_.Unlock();
       (*func)(arg);
+      if (arg->owner) {
+        completed_arg = arg;
+      }
     }
   }
 }
